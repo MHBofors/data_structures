@@ -1,5 +1,5 @@
 #include "heap.h"
-#include <stdio.h>
+
 #define HEAP_INIT_SIZE 32
 #define HEAP_PARENT(i) ((i - 1) >> 1)
 #define HEAP_CHILD_LEFT(i) (((i) << 1) + 1)
@@ -49,6 +49,8 @@ void *heap_resize(heap_t *heap, size_t heap_size) {
     }
 }
 
+
+
 void *heap_get_element(heap_t *heap, size_t index) {
     if(index < 0 || heap->element_count <= index) {
         return NULL;
@@ -66,6 +68,8 @@ void memswap(void *a, void *b, size_t size) {
         *B++ = temp;
     }
 }
+
+
 
 void sift_up(heap_t *heap, size_t end) {
     char *data = heap->data;
@@ -99,6 +103,8 @@ void sift_down(heap_t *heap, size_t start, size_t end) {
     }
 }
 
+
+
 size_t grow(size_t n) {
     n--;
     for(size_t i = 0; i < sizeof(size_t); i++) {
@@ -107,6 +113,8 @@ size_t grow(size_t n) {
 
     return (++n) << 1;
 }
+
+
 
 void heapify(heap_t *heap, void *array, size_t element_count) {
     if(heap->heap_size <= heap->element_count + element_count) {
@@ -140,8 +148,7 @@ void heap_push(heap_t *heap, void *push_source) {
         }
     }
     
-    void *leaf = (char *)heap->data + heap->element_size*heap->element_count;
-    memcpy(leaf, push_source, heap->element_size);
+    memcpy((char *)heap->data + heap->element_size*heap->element_count, push_source, heap->element_size);
     heap->element_count++;
 
     for(size_t end = 0; end < heap->element_count; end++) {
@@ -172,6 +179,8 @@ void heap_replace(heap_t *heap, void *replace_source) {
 void heap_peek(heap_t *heap, void *peek_destination) {
     memcpy(peek_destination, heap->data, heap->element_size);
 }
+
+
 
 size_t heap_size(heap_t *heap) {
     return heap->element_count;
