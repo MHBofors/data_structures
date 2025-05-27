@@ -39,7 +39,7 @@ void heap_free(heap_t *heap) {
     free(heap);
 }
 
-void *heap_resize(heap_t *heap, size_t heap_size) {
+static void *heap_resize(heap_t *heap, size_t heap_size) {
     void *new_data = realloc(heap->data, heap->element_size * heap_size);
 
     if(new_data != NULL) {
@@ -51,7 +51,7 @@ void *heap_resize(heap_t *heap, size_t heap_size) {
 
 
 
-void *heap_get_element(heap_t *heap, size_t index) {
+static void *heap_get_element(heap_t *heap, size_t index) {
     if(index < 0 || heap->element_count <= index) {
         return NULL;
     } else {
@@ -59,7 +59,7 @@ void *heap_get_element(heap_t *heap, size_t index) {
     }
 }
 
-void memswap(void *a, void *b, size_t size) {
+static void memswap(void *a, void *b, size_t size) {
     char temp, *A = a, *B = b;
 
     while(size-- > 0) {
@@ -71,7 +71,7 @@ void memswap(void *a, void *b, size_t size) {
 
 
 
-void sift_up(heap_t *heap, size_t end) {
+static void sift_up(heap_t *heap, size_t end) {
     char *data = heap->data;
 
     while(end > 0) {
@@ -85,7 +85,7 @@ void sift_up(heap_t *heap, size_t end) {
     }
 }
 
-void sift_down(heap_t *heap, size_t start, size_t end) {
+static void sift_down(heap_t *heap, size_t start, size_t end) {
     size_t child, root = start;
     char *data = heap->data;
 
@@ -105,7 +105,7 @@ void sift_down(heap_t *heap, size_t start, size_t end) {
 
 
 
-size_t grow(size_t n) {
+static size_t grow(size_t n) {
     n--;
     for(size_t i = 0; i < sizeof(size_t); i++) {
         n |= n >> (1 << i);
@@ -116,12 +116,12 @@ size_t grow(size_t n) {
 
 
 
-void heapify(heap_t *heap, void *array, size_t element_count) {
+bool heapify(heap_t *heap, void *array, size_t element_count) {
     if(heap->heap_size <= heap->element_count + element_count) {
         size_t size = grow(heap->element_count + element_count); 
 
         if(heap_resize(heap, size) == NULL) {
-            return;
+            return false;
         } else {
             heap->heap_size = size;
         }
@@ -135,14 +135,16 @@ void heapify(heap_t *heap, void *array, size_t element_count) {
     for(size_t start = heap->element_count >> 1; 0 <= start; start--) {
         sift_down(heap, start, heap->element_count - 1);
     }
+
+    return true;
 }
 
-void heap_push(heap_t *heap, void *push_source) {
+bool heap_push(heap_t *heap, void *push_source) {
     if(heap->heap_size <= heap->element_count) {
         size_t size = grow(heap->heap_size); 
 
         if(heap_resize(heap, size) == NULL) {
-            return;
+            return false;
         } else {
             heap->heap_size = size;
         }
@@ -154,30 +156,39 @@ void heap_push(heap_t *heap, void *push_source) {
     for(size_t end = 0; end < heap->element_count; end++) {
         sift_up(heap, end);
     }
+
+    return true;
 }
 
-void heap_pop(heap_t *heap, void *pop_destination) {
+bool heap_pop(heap_t *heap, void *pop_destination) {
     if(0 < heap->element_count) {
         memcpy(pop_destination, heap->data, heap->element_size);
         memcpy(heap->data, (char *)heap->data + heap->element_size*(heap->element_count - 1), heap->element_size);
         heap->element_count--;
         sift_down(heap, 0, heap->element_count);
+        return true;
     } else {
-        return;
+        return false;
     }
 }
 
-void heap_replace(heap_t *heap, void *replace_source) {
+bool heap_replace(heap_t *heap, void *replace_source) {
     if(0 < heap->element_count) {
         memswap(heap->data, replace_source, heap->element_size);
         sift_down(heap, 0, heap->element_count);
+        return true;
     } else {
-        return;
+        return false;
     }
 }
 
-void heap_peek(heap_t *heap, void *peek_destination) {
-    memcpy(peek_destination, heap->data, heap->element_size);
+bool heap_peek(heap_t *heap, void *peek_destination) {
+    if(0 < heap->element_count) {
+        memcpy(peek_destination, heap->data, heap->element_size);
+        return true;
+    } else {
+        return false;
+    }
 }
 
 
