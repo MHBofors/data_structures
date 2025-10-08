@@ -334,7 +334,6 @@ void map_rehash(map_t *map) {
     void *item = NULL;
 
     do {
-        printf("Rehashing...\n");
         generate_seed(map->seed_0, SEED_SIZE);
         generate_seed(map->seed_1, SEED_SIZE);
 
