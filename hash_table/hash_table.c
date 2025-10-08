@@ -355,6 +355,8 @@ void map_rehash(map_t *map) {
 
         restart:
     } while(item);
+
+    map->insertion_count = 0;
 }
 
 static bool map_delete_bucket(map_t *map, void *bucket[BUCKET_SIZE], const void *restrict key) {
