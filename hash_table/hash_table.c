@@ -1,167 +1,317 @@
 #include "hash_table.h"
-#include <time.h>
 
-#define STASH_SIZE 8
-#define MAP_INIT_SIZE 8
-#define ALPHA 4
+#define BUCKET_SIZE 8UL
+#define STASH_SIZE 8UL
+#define MAP_INIT_SIZE 4UL
+#define ALPHA 4UL
 #define EPSILON 1.5f
+#define BUCKET_ALIGNMENT 64UL
+
+#define table_construct(KEY_TYPE, VALUE_TYPE) map_alloc(sizeof(KEY_TYPE), sizeof(VALUE_TYPE), _Alignof(KEY_TYPE) > _Alignof(VALUE_TYPE) ? _Alignof(KEY_TYPE) : _Alignof(VALUE_TYPE))
 
 struct map_t {
-    size_t table_size;
-    size_t key_count;
+    size_t entry_count;
     size_t insertion_count;
-    size_t h_0[8][256], h_1[8][256];
-    size_t stash[STASH_SIZE];
-    size_t *table;/* 1 << table_size + 1 */
+    size_t table_size;
+
+    size_t key_size;
+    size_t value_size;
+    size_t alignment;
+
+    size_t (*hash)(const void *restrict, size_t, const void *restrict);
+    int (*is_equal)(const void*, const void*, size_t);
+
+    void (*key_write)(void *restrict, const void *restrict, size_t);
+    void (*value_write)(void *restrict, const void *restrict, size_t);
+
+    size_t seed_size;
+    void *seed_0, *seed_1;
+
+    void *(*table_0)[BUCKET_SIZE], *(*table_1)[BUCKET_SIZE];
+    void *stash[STASH_SIZE];
 };
 
-
-
-void generate_hash(size_t m, size_t n, size_t T[m][n]) {
-    arc4random_buf(T, sizeof(size_t)*m*n);
-    for(size_t i = 0; i < m; i++) {
-        for(size_t j = 0; j < n; j++) {
-
-        }
+void *ptr_align_up(void *ptr, size_t alignment) {
+    if(!alignment || alignment & (alignment - 1)) {
+        return NULL; 
     }
+    return (void *)(((uintptr_t)ptr + alignment - 1) & ~(alignment - 1));
 }
 
-size_t hash(size_t key, size_t T[8][256]) {
-    size_t H = 0;
-    for(size_t i = 0; i < sizeof(size_t); i++) {
-        H ^= T[i][(unsigned char)(key >> 8*i)]; 
-    }
-
-    return H;
+size_t entry_size(size_t key_size, size_t value_size, size_t alignment) {
+    size_t offset = (key_size + alignment - 1) & ~(alignment - 1);
+    offset += (value_size + alignment - 1) & ~(alignment - 1);
+    return offset;
 }
 
-map_t *map_alloc(size_t element_size) {
-    map_t *map = malloc(sizeof(map_t));
-    size_t *table = calloc(1 << MAP_INIT_SIZE, sizeof(size_t));
+void *alloc_entry(size_t key_size, size_t value_size, size_t alignment) {
+    return malloc(entry_size(key_size, value_size, alignment));
+}
 
-    if(map != NULL && map != NULL) {
-        *map = (map_t){
-            .table_size = MAP_INIT_SIZE,
-            .key_count = 0,
-            .stash = {0},
-            .insertion_count = 0,
-            .table = table
-        };
-        
-        generate_hash(8, 256, map->h_0);
-        generate_hash(8, 256, map->h_1);
-        return map;
-    } else {
-        free(map);
-        free(table);
-        return NULL;
-    }
+void generate_seed(void *T, size_t n) {
+    arc4random_buf(T, n);
+}
+
+size_t map_count(map_t *map) {
+    return map->entry_count;
 }
 
 void map_free(map_t *map) {
-    free(map->table);
+    for(size_t i = 0; i < (1 << map->table_size); i++) {
+        for(size_t j = 0; j < BUCKET_SIZE; j++) {
+            free(map->table_0[i][j]);
+            free(map->table_1[i][j]);
+        }
+    }
+    for(size_t i = 0; i < STASH_SIZE; i++) {
+        free(map->stash[i]);
+    }
+
+    free(map->table_0);
+    free(map->table_1);
+
+    free(map->seed_0);
+    free(map->seed_1);
+
     free(map);
 }
 
 
 
-static size_t max_iterations(size_t n) {
-    size_t m;
-    for(m = 8*sizeof(size_t); n; n >>= 1, --m);
-    return m;
-}
+map_t *map_alloc(size_t key_size, size_t value_size, size_t alignment) {
+    if(key_size == 0 || value_size == 0 || (alignment & (alignment - 1))) {
+        return NULL; // Invalid key or value size
+    }
 
-static void swap(size_t *a, size_t *b) {
-    size_t temp = *a;
-    *a = *b;
-    *b = temp;
-}
+    map_t *map = malloc(sizeof(map_t));
+    void *seed_0 = aligned_alloc(BUCKET_ALIGNMENT, SEED_SIZE);
+    void *seed_1 = aligned_alloc(BUCKET_ALIGNMENT, SEED_SIZE);
+    void *table_0 = aligned_alloc(BUCKET_ALIGNMENT, sizeof(void*)*BUCKET_SIZE*(1 << MAP_INIT_SIZE));
+    void *table_1 = aligned_alloc(BUCKET_ALIGNMENT, sizeof(void*)*BUCKET_SIZE*(1 << MAP_INIT_SIZE));
+    void *stash = aligned_alloc(BUCKET_ALIGNMENT, sizeof(void*)*STASH_SIZE);
 
-static inline size_t *map_resize(map_t *map, size_t map_size) {
-    size_t *new_table = realloc(map->table, sizeof(size_t)*(1 << (map_size)));
-    
-    if(new_table != NULL) {
-        map->table = new_table;
+    if(map != NULL && map != NULL && seed_0 != NULL && seed_1 != NULL && table_0 != NULL && table_1 != NULL && stash != NULL) {
+        *map = (map_t){
+            .entry_count = 0,
+            .insertion_count = 0,
+            .table_size = MAP_INIT_SIZE,
 
-        for(size_t i = 1 << (map_size - 1); i < (1 << map_size); i++) {
-            map->table[i] = 0;
+            .key_size = key_size,
+            .value_size = value_size,
+            .alignment = alignment,
+
+            .hash = zhash,
+            .is_equal = memcmp,
+
+            .key_write = (void (*)(void *restrict, const void *restrict, size_t))memcpy,
+            .value_write = (void (*)(void *restrict, const void *restrict, size_t))memcpy,
+            
+            .seed_size = SEED_SIZE,
+            .seed_0 = seed_0,
+            .seed_1 = seed_1,
+
+            .table_0 = table_0,
+            .table_1 = table_1,
+            .stash = stash
+        };
+        
+        generate_seed(seed_0, SEED_SIZE);
+        generate_seed(seed_1, SEED_SIZE);
+
+        for(size_t i = 0; i < (1 << map->table_size); i++) {
+            for(size_t j = 0; j < BUCKET_SIZE; j++) {
+                map->table_0[i][j] = NULL;
+                map->table_1[i][j] = NULL;
+            }
         }
-        return map->table;
+
+        for(size_t i = 0; i < STASH_SIZE; i++) {
+            map->stash[i] = NULL;
+        }
+        return map;
+    } else {
+        free(map->seed_0);
+        free(map->seed_1);
+        free(map->table_0);
+        free(map->table_1);
+        free(map->stash);
+        free(map);
+        return NULL;
+    }
+}
+
+map_t *map_alloc_strn(size_t key_size, size_t value_size) {
+    map_t *map = map_alloc(key_size, value_size, _Alignof(char));
+    map_set_hash(map, strnhash);
+    map_set_is_equal(map, (int (*)(const void*, const void*, size_t))strncmp);
+    map_set_key_write(map, (void (*)(void *restrict, const void *restrict, size_t))strncpy);
+    map_set_value_write(map, (void (*)(void *restrict, const void *restrict, size_t))strncpy);
+    return map;
+}
+
+void map_set_hash(map_t *map, size_t (*hash)(const void*, size_t, const void*)) {
+    map->hash = hash;
+}
+void map_set_is_equal(map_t *map, int (*is_equal)(const void*, const void*, size_t)) {
+    map->is_equal = is_equal;
+}
+void map_set_key_write(map_t *map, void (*key_write)(void *restrict, const void *restrict, size_t)) {
+    map->key_write = key_write;
+}
+void map_set_value_write(map_t *map, void (*value_write)(void *restrict, const void *restrict, size_t)) {
+    map->value_write = value_write;
+}
+
+static inline bool map_resize(map_t *map, size_t new_size) {
+    void *new_table_0 = aligned_alloc(BUCKET_ALIGNMENT, sizeof(void*)*BUCKET_SIZE*(1 << (new_size)));
+    void *new_table_1 = aligned_alloc(BUCKET_ALIGNMENT, sizeof(void*)*BUCKET_SIZE*(1 << (new_size)));
+    
+    if(new_table_0 != NULL && new_table_1 != NULL) {
+        memcpy(new_table_0, map->table_0, sizeof(void*)*BUCKET_SIZE*(1 << (map->table_size)));
+        memcpy(new_table_1, map->table_1, sizeof(void*)*BUCKET_SIZE*(1 << (map->table_size)));
+        
+        free(map->table_0);
+        free(map->table_1);
+        
+        map->table_0 = new_table_0;
+        map->table_1 = new_table_1;
+
+        for(size_t i = (1 << map->table_size); i < (1 << new_size); i++) {
+            for(size_t j = 0; j < BUCKET_SIZE; j++) {
+                map->table_0[i][j] = NULL;
+                map->table_1[i][j] = NULL;
+            }
+        }
+
+        map->table_size = new_size;
+        return true;
+    } else {
+        free(new_table_0);
+        free(new_table_1);
+        return false;
+    }
+}
+
+static bool map_should_resize(map_t *map) {
+    return ((1UL << (map->table_size + 1))*BUCKET_SIZE <= (3*map->entry_count));
+}
+
+static void *map_probe_bucket(map_t *map, void *bucket[BUCKET_SIZE], const void *restrict key) {
+    for(size_t i = 0; i < BUCKET_SIZE; i++) {
+        if(bucket[i] && map->is_equal(key, bucket[i], map->key_size) == 0) {
+            return bucket[i];
+        }
+    }
+
+    return NULL;
+}
+
+static void *map_probe_stash(map_t *map, const void *restrict key) {
+    for(size_t i = 0; i < STASH_SIZE; i++) {
+        if(map->stash[i] && map->is_equal(key, map->stash[i], map->key_size) == 0) {
+            return map->stash[i];
+        }
+    }
+
+    return NULL;
+}
+
+static void *map_cuckoo_bucket(void *item, void *bucket[BUCKET_SIZE]) {
+    if(bucket[BUCKET_SIZE - 1]) {
+        void *temp = bucket[BUCKET_SIZE - 1];
+        memmove(bucket + 1, bucket, (BUCKET_SIZE - 1)*sizeof(void*));
+        bucket[0] = item;
+        return temp;
+    } else {
+        for(size_t i = 0; i < BUCKET_SIZE; i++) {
+            if(!bucket[i]) {
+                bucket[i] = item;
+                return NULL;
+            }
+        }
+    }
+
+    return item;
+}
+
+static inline void *map_cuckoo(map_t *map, void *item, size_t max_iter) {
+    if(item) {
+        for(size_t i = 0; i < max_iter; i++) {
+            size_t h_0 = (map->hash(item, map->key_size, map->seed_0) & ((1 << (map->table_size)) - 1));
+            item = map_cuckoo_bucket(item, map->table_0[h_0]);
+            if(!item) return NULL;
+    
+            size_t h_1 = (map->hash(item, map->key_size, map->seed_1) & ((1 << (map->table_size)) - 1));
+            item = map_cuckoo_bucket(item, map->table_1[h_1]);
+            if(!item) return NULL;
+        }
+
+        for(size_t i = 0; i < STASH_SIZE; i++) {
+            if(!map->stash[i]) {
+                map->stash[i] = item;
+                return NULL;
+            }
+        }
+
+        return item;
     } else {
         return NULL;
     }
 }
 
-static size_t map_cuckoo(map_t *map, size_t key, size_t N) {
-    if(key) {
-        for(size_t i = 0; i < N; i++) {
-            size_t h_0 = (hash(key, map->h_0) & (1 << (map->table_size)) - 1) & ~1;
-            swap(&key, &map->table[h_0]);
-            if(key == 0) return 0;
-    
-            size_t h_1 = (hash(key, map->h_1) & (1 << (map->table_size)) - 1) | 1;
-            swap(&key, &map->table[h_1]);
-            if(key == 0) return 0;
-        }
-    
-        for(size_t i = 0; i < STASH_SIZE; i++) {
-            swap(&key, &map->stash[i]);
-            if(key == 0) return 0;
-        }
-    }
+static void *map_probe(map_t *map, const void *key) {
+    size_t h_0 = (map->hash(key, map->key_size, map->seed_0) & ((1 << (map->table_size)) - 1));
+    void *item = map_probe_bucket(map, map->table_0[h_0], key);
+    if(item) return item;
 
-    return key;
+    size_t h_1 = (map->hash(key, map->key_size, map->seed_1) & ((1 << (map->table_size)) - 1));
+    item = map_probe_bucket(map, map->table_1[h_1], key);
+    if(item) return item;
+
+    item = map_probe_stash(map, key);
+    if(item) return item;
+
+    return NULL;
 }
 
-static void map_rehash(map_t *map) {
-    bool rehashed;
-    size_t max_iter = ALPHA*map->table_size;
-    size_t key = 0;
+void *map_lookup(map_t *map, const void *key, void *lookup_dst) {
+    void *item = map_probe(map, key);
 
-    do {
-        rehashed = true;
-        generate_hash(8, 256, map->h_0);
-        generate_hash(8, 256, map->h_1);
+    if(item) {
+        void *value = ptr_align_up((char*)item + map->key_size, map->alignment);
 
-        if(key = map_cuckoo(map, key, max_iter)) {
-            rehashed = false;
-            continue;
-        }
-
-        for(size_t i = 0; i < 1 << (map->table_size) && rehashed; i++) {
-            key = map->table[i];
-            map->table[i] = 0;
-            if(key = map_cuckoo(map, key, max_iter)) {
-                rehashed = false;
-            }
-        }
-
-
-    } while(!rehashed);
-
-    map->insertion_count = 0;
-}
-
-bool map_insert(map_t *map, size_t key) {
-    if(!key) {
-        return false; // 0 is not a valid key
-    } else if(map_search(map, key)) {
-        return true;
-    } else {
-        if(1UL << map->table_size <= (3*map->key_count)) {
-            size_t new_size = map->table_size + 2;
-            
-            if(!map_resize(map, new_size)) {
-                return false;
-            } else {
-                map->table_size = new_size;
-                map_rehash(map);
-            }
+        if(lookup_dst) {
+            map->value_write(lookup_dst, value, map->value_size);
         }
         
-        if((1<<map->table_size) < map->insertion_count) {
+        return value;
+    } else {
+        return NULL;
+    }
+}
+
+bool map_insert(map_t *map, const void *key, const void *value) {
+    if(!key || !value) {
+        return false; // 0 is not a valid key or value
+    } else if(map_probe(map, key)) {
+        return true;
+    } else {
+        if(map_should_resize(map)) {
+            size_t new_size = map->table_size + 1;
+
+            if(!map_resize(map, new_size)) {
+                return false;
+            }
+
             map_rehash(map);
         }
+
+        void *item = alloc_entry(map->key_size, map->value_size, map->alignment);
+        if(!item) return false;
+
+        map->key_write(item, key, map->key_size);
+        void *value_ptr = ptr_align_up((char*)item + map->key_size, map->alignment);
+        map->value_write(value_ptr, value, map->value_size);
 
         size_t max_iter = ALPHA*map->table_size;
         for(size_t i = 0; i < STASH_SIZE; i++) {
@@ -169,35 +319,49 @@ bool map_insert(map_t *map, size_t key) {
                 map->stash[i] = map_cuckoo(map, map->stash[i], max_iter);
             }
         }
-        while(key = map_cuckoo(map, key, max_iter)) {
+        while(item = map_cuckoo(map, item, max_iter)) {
             map_rehash(map);
         }
 
-        map->key_count++;
+        map->entry_count++;
         map->insertion_count++;
         return true;
     }
 }
 
-bool map_delete(map_t *map, size_t key) {
-    size_t *key_0;
-    key_0 = &map->table[(hash(key, map->h_0) & (1 << (map->table_size)) - 1) & ~1];
-    if(*key_0 == key) {
-        *key_0 = 0;
-        map->key_count--;
-        return true;
-    }
-    key_0 = &map->table[(hash(key, map->h_1) & (1 << (map->table_size)) - 1) | 1];
-    if(*key_0 == key) {
-        *key_0 = 0;
-        map->key_count--;
-        return true;
-    }
+void map_rehash(map_t *map) {
+    size_t max_iter = ALPHA*map->table_size;
+    void *item = NULL;
 
-    for(size_t i = 0; i < STASH_SIZE; i++) {
-        if(map->table[i] == key) {
-            map->table[i] = 0;
-            map->key_count--;
+    do {
+        printf("Rehashing...\n");
+        generate_seed(map->seed_0, SEED_SIZE);
+        generate_seed(map->seed_1, SEED_SIZE);
+
+        if(item = map_cuckoo(map, item, max_iter))  goto restart;
+
+        for(size_t i = 0; i < 1 << (map->table_size); i++) {
+            for(size_t j = 0; j < BUCKET_SIZE; j++) {
+                item = map->table_0[i][j];
+                map->table_0[i][j] = NULL;
+                if(item = map_cuckoo(map, item, max_iter)) goto restart;
+            }
+            for(size_t j = 0; j < BUCKET_SIZE; j++) {
+                item = map->table_1[i][j];
+                map->table_1[i][j] = NULL;
+                if(item = map_cuckoo(map, item, max_iter)) goto restart;
+            }
+        }
+
+        restart:
+    } while(item);
+}
+
+static bool map_delete_bucket(map_t *map, void *bucket[BUCKET_SIZE], const void *restrict key) {
+    for(size_t i = 0; i < BUCKET_SIZE; i++) {
+        if(bucket[i] && map->is_equal(key, bucket[i], map->key_size) == 0) {
+            free(bucket[i]);
+            bucket[i] = NULL;
             return true;
         }
     }
@@ -205,17 +369,38 @@ bool map_delete(map_t *map, size_t key) {
     return false;
 }
 
-bool map_search(map_t *map, size_t key) {
-    bool key_found = 0;
-
-    if(key == map->table[(hash(key, map->h_0) & (1 << (map->table_size)) - 1) & ~1]) return true;
-    if(key == map->table[(hash(key, map->h_1) & (1 << (map->table_size)) - 1) | 1]) return true;
-
-    //key_found |= (key == map->table[(hash(key, map->h_0) & (1 << (map->table_size)) - 1) & ~1]);
-    //key_found |= (key == map->table[(hash(key, map->h_1) & (1 << (map->table_size)) - 1) | 1]);
-
+static bool map_delete_stash(map_t *map, const void *restrict key) {
     for(size_t i = 0; i < STASH_SIZE; i++) {
-        if(key == map->stash[i]) return true;
+        if(map->stash[i] && map->is_equal(key, map->stash[i], map->key_size) == 0) {
+            free(map->stash[i]);
+            map->stash[i] = NULL;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool map_delete(map_t *map, const void *key) {
+    if(!key) {
+        return false;
+    }
+
+    size_t h_0 = (map->hash(key, map->key_size, map->seed_0) & ((1 << (map->table_size)) - 1));
+    if(map_delete_bucket(map, map->table_0[h_0], key)) {
+        map->entry_count--;
+        return true;
+    }
+
+    size_t h_1 = (map->hash(key, map->key_size, map->seed_1) & ((1 << (map->table_size)) - 1));
+    if(map_delete_bucket(map, map->table_1[h_1], key)) {
+        map->entry_count--;
+        return true;
+    }
+
+    if(map_delete_stash(map, key)) {
+        map->entry_count--;
+        return true;
     }
 
     return false;
