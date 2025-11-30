@@ -30,8 +30,10 @@ darray_t *array_alloc(size_t element_size) {
 }
 
 void array_free(darray_t *array) {
-    free(array->data);
-    free(array);
+    if(array) {
+        free(array->data);
+        free(array);
+    }
 }
 
 static void *array_resize(darray_t *array, size_t array_size) {
@@ -47,7 +49,7 @@ static void *array_resize(darray_t *array, size_t array_size) {
 
 
 static void *array_get_element(darray_t *array, size_t index) {
-    if(index < 0 || array->element_count <= index) {
+    if(array->element_count <= index) {
         return NULL;
     } else {
         return (char *)array->data + array->element_size*index;

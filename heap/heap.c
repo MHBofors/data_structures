@@ -196,13 +196,3 @@ bool heap_peek(heap_t *heap, void *peek_destination) {
 size_t heap_size(heap_t *heap) {
     return heap->element_count;
 }
-
-void heap_print(heap_t *heap, void print_element(const void*)) {
-    for(size_t i = 0; (1 << i) - 1 < heap->element_count; i++) {
-        for(size_t j = (1 << i) - 1; j < HEAP_CHILD_LEFT((1 << i) - 1) && j < heap->element_count; j++) {
-            print_element((char *)heap->data + j*heap->element_size);
-        }
-
-        printf("\n");
-    }
-}

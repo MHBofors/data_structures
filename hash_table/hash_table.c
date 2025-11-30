@@ -337,22 +337,22 @@ void map_rehash(map_t *map) {
         generate_seed(map->seed_0, SEED_SIZE);
         generate_seed(map->seed_1, SEED_SIZE);
 
-        if(item = map_cuckoo(map, item, max_iter))  goto restart;
+        if(item = map_cuckoo(map, item, max_iter))  goto retry;
 
         for(size_t i = 0; i < 1 << (map->table_size); i++) {
             for(size_t j = 0; j < BUCKET_SIZE; j++) {
                 item = map->table_0[i][j];
                 map->table_0[i][j] = NULL;
-                if(item = map_cuckoo(map, item, max_iter)) goto restart;
+                if(item = map_cuckoo(map, item, max_iter)) goto retry;
             }
             for(size_t j = 0; j < BUCKET_SIZE; j++) {
                 item = map->table_1[i][j];
                 map->table_1[i][j] = NULL;
-                if(item = map_cuckoo(map, item, max_iter)) goto restart;
+                if(item = map_cuckoo(map, item, max_iter)) goto retry;
             }
         }
 
-        restart:
+        retry:
     } while(item);
 
     map->insertion_count = 0;

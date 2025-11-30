@@ -18,7 +18,7 @@ map_t *map_alloc_strn(size_t key_size, size_t value_size);
 void map_free(map_t *map);
 
 void map_set_hash(map_t *map, size_t (*hash)(const void*, size_t, const void*));
-void map_set_is_equal(map_t *map, int (*is_equal)(const void*, const void*, size_t));
+void map_set_is_equal(map_t *map, int (*compare)(const void*, const void*, size_t));
 void map_set_key_write(map_t *map, void (*key_write)(void *restrict, const void *restrict, size_t));
 void map_set_value_write(map_t *map, void (*value_write)(void *restrict, const void *restrict, size_t));
 

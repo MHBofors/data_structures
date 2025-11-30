@@ -19,6 +19,4 @@ bool heap_peek(heap_t *heap, void *peek_destination);
 
 size_t heap_size(heap_t *heap);
 
-void heap_print(heap_t *heap, void print_element(const void*));
-
 #endif
