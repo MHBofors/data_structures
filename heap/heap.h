@@ -1,14 +1,15 @@
 #ifndef HEAP_H
 #define HEAP_H
 
-#include <stdlib.h>
-#include <stdio.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct heap_t heap_t;
 
-heap_t *heap_alloc(size_t element_size, int (*compare)(const void*, const void*));
+heap_t *heap_alloc(size_t element_size,
+                   int (*compare)(const void *, const void *));
 void heap_free(heap_t *heap);
 
 bool heapify(heap_t *heap, void *array, size_t element_count);
