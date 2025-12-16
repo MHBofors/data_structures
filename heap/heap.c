@@ -73,7 +73,7 @@ static void sift_up(heap_t *heap, size_t end) {
 		size_t root = HEAP_PARENT(end);
 
 		if (heap->compare(data + heap->element_size * root,
-		                  data + heap->element_size * end)) {
+		                  data + heap->element_size * end) == 1) {
 			memswap(data + heap->element_size * root,
 			        data + heap->element_size * end, heap->element_size);
 		} else {
@@ -89,12 +89,12 @@ static void sift_down(heap_t *heap, size_t start, size_t end) {
 	while ((child = HEAP_CHILD_LEFT(root)) < end) {
 		if (child + 1 < end &&
 		    heap->compare(data + heap->element_size * child,
-		                  data + heap->element_size * (child + 1))) {
+		                  data + heap->element_size * (child + 1)) == 1) {
 			child++;
 		}
 
 		if (heap->compare(data + heap->element_size * root,
-		                  data + heap->element_size * child)) {
+		                  data + heap->element_size * child) == 1) {
 			memswap(data + heap->element_size * root,
 			        data + heap->element_size * child, heap->element_size);
 			root = child;
