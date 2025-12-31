@@ -19,7 +19,7 @@ void map_free(map_t *map);
 
 void map_set_hash(map_t *map,
                   size_t (*hash)(const void *, size_t, const void *));
-void map_set_is_equal(map_t *map,
+void map_set_compare(map_t *map,
                       int (*compare)(const void *, const void *, size_t));
 void map_set_key_write(map_t *map,
                        void (*key_write)(void *restrict, const void *restrict,
@@ -40,5 +40,7 @@ size_t map_count(map_t *map);
 static void map_rehash(map_t *map);
 
 static void *map_cuckoo(map_t *map, void *item, size_t max_iter);
+
+void map_print(map_t *map);
 
 #endif
