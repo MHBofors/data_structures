@@ -1,60 +1,6 @@
 #include "heap.h"
 
 #define HEAP_INIT_SIZE 32
-#define HEAP_PARENT(i) ((i - 1) >> 1)
-#define HEAP_CHILD_LEFT(i) (((i) << 1) + 1)
-#define HEAP_CHILD_RIGHT(i) (((i) << 1) + 2)
-
-struct heap_t {
-	size_t element_size;
-	size_t element_count;
-	size_t heap_size;
-	void *data;
-	int (*compare)(const void *, const void *);
-};
-
-heap_t *heap_alloc(size_t element_size,
-                   int (*compare)(const void *, const void *)) {
-	heap_t *heap = malloc(sizeof(heap_t));
-	void *data = malloc(HEAP_INIT_SIZE * element_size);
-
-	if (heap != NULL && data != NULL && compare != NULL) {
-		*heap = (heap_t){.element_size = element_size,
-		                 .element_count = 0,
-		                 .heap_size = HEAP_INIT_SIZE,
-		                 .data = data,
-		                 .compare = compare};
-
-		return heap;
-	} else {
-		free(heap);
-		free(data);
-		return NULL;
-	}
-}
-
-void heap_free(heap_t *heap) {
-	free(heap->data);
-	free(heap);
-}
-
-static void *heap_resize(heap_t *heap, size_t heap_size) {
-	void *new_data = realloc(heap->data, heap->element_size * heap_size);
-
-	if (new_data != NULL) {
-		return heap->data = new_data;
-	} else {
-		return NULL;
-	}
-}
-
-static void *heap_get_element(heap_t *heap, size_t index) {
-	if (index < 0 || heap->element_count <= index) {
-		return NULL;
-	} else {
-		return (char *)heap->data + heap->element_size * index;
-	}
-}
 
 static void memswap(void *a, void *b, size_t size) {
 	char temp, *A = a, *B = b;
@@ -66,129 +12,122 @@ static void memswap(void *a, void *b, size_t size) {
 	}
 }
 
-static void sift_up(heap_t *heap, size_t end) {
-	char *data = heap->data;
 
-	while (end > 0) {
-		size_t root = HEAP_PARENT(end);
 
-		if (heap->compare(data + heap->element_size * root,
-		                  data + heap->element_size * end) == 1) {
-			memswap(data + heap->element_size * root,
-			        data + heap->element_size * end, heap->element_size);
-		} else {
-			return;
-		}
+void sift_down_r(size_t i, void *base, size_t count, size_t size,
+             int (*compare)(const void *, const void *)) {
+	size_t i_min = i, left = HEAP_CHILD_LEFT(i), right = HEAP_CHILD_RIGHT(i);
+
+	if(left < count && compare((char *)base + left*size, (char *)base + i_min*size) == -1) {
+		i_min = left;
+	}
+
+	if(right < count && compare((char *)base + right*size, (char *)base + i_min*size) == -1) {
+		i_min = right;
+	}
+
+	if(i_min != i) {
+		memswap((char *)base + i_min*size, (char *)base + i*size, sizeof(size_t));
+		sift_down(i_min, base, count, size, compare);
 	}
 }
 
-static void sift_down(heap_t *heap, size_t start, size_t end) {
-	size_t child, root = start;
-	char *data = heap->data;
 
-	while ((child = HEAP_CHILD_LEFT(root)) < end) {
-		if (child + 1 < end &&
-		    heap->compare(data + heap->element_size * child,
-		                  data + heap->element_size * (child + 1)) == 1) {
-			child++;
+
+void sift_down(size_t i, void *base, size_t count, size_t size,
+             int (*compare)(const void *, const void *)) {
+	while(i < count) {
+		size_t i_min = i, left = HEAP_CHILD_LEFT(i), right = HEAP_CHILD_RIGHT(i);
+		if(left < count && compare((char *)base + left*size, (char *)base + i_min*size) == -1) {
+			i_min = left;
 		}
 
-		if (heap->compare(data + heap->element_size * root,
-		                  data + heap->element_size * child) == 1) {
-			memswap(data + heap->element_size * root,
-			        data + heap->element_size * child, heap->element_size);
-			root = child;
+		if(right < count && compare((char *)base + right*size, (char *)base + i_min*size) == -1) {
+			i_min = right;
+		}
+
+		if(i_min != i) {
+			memswap((char *)base + i_min*size, (char *)base + i*size, sizeof(size_t));
+			i = i_min;
+			continue;
+		} else {
+			break;
+		}
+	}
+
+}
+
+
+
+void sift_up(size_t i, void *base, size_t size,
+           int (*compare)(const void *, const void *)) {
+	while(0 < i) {
+		size_t parent = HEAP_PARENT(i);
+
+		if(compare((char *)base + i*size, (char *)base + parent*size) == -1) {
+			memswap((char *)base + i*size, (char *)base + parent*size, size);
+			i = parent;
 		} else {
 			break;
 		}
 	}
 }
 
-static size_t grow(size_t n) {
-	n--;
-	for (size_t i = 0; i < sizeof(size_t); i++) {
-		n |= n >> (1 << i);
-	}
 
-	return (++n) << 1;
+
+void sift_up_r(size_t i, void *base, size_t size,
+           int (*compare)(const void *, const void *)) {
+	size_t parent = HEAP_PARENT(i);
+
+	if(i > 0 && compare((char *)base + i*size, (char *)base + parent*size) == -1) {
+		memswap((char *)base + i*size, (char *)base + parent*size, size);
+		sift_up(parent, base, size, compare);
+	}
 }
 
-bool heapify(heap_t *heap, void *array, size_t element_count) {
-	if (heap->heap_size <= heap->element_count + element_count) {
-		size_t size = grow(heap->element_count + element_count);
+void heap_push(void *src, void *base, size_t count, size_t size, 
+             int (*compare)(const void *, const void *)) {
+	memcpy((char *)base + count*size, src, size);
+	sift_up(count, base, size, compare);
+}
 
-		if (heap_resize(heap, size) == NULL) {
-			return false;
-		} else {
-			heap->heap_size = size;
+void heap_pop(void *dst, void *base, size_t count, size_t size, 
+             int (*compare)(const void *, const void *)) {
+	if(0 < count) {
+		if(dst != NULL) {
+			memcpy(dst, base, size);
 		}
+
+		memmove(base, (char *)base + (count - 1)*size, size);
+		sift_down(0, base, count, size, compare);
 	}
-
-	void *leaf = (char *)heap->data + heap->element_size * heap->element_count;
-	memcpy(leaf, array, heap->element_size * element_count);
-	heap->element_count++;
-
-	for (size_t start = heap->element_count >> 1; 0 <= start; start--) {
-		sift_down(heap, start, heap->element_count - 1);
-	}
-
-	return true;
 }
 
-bool heap_push(heap_t *heap, void *push_source) {
-	if (heap->heap_size <= heap->element_count) {
-		size_t size = grow(heap->heap_size);
 
-		if (heap_resize(heap, size) == NULL) {
-			return false;
-		} else {
-			heap->heap_size = size;
-		}
-	}
 
-	memcpy((char *)heap->data + heap->element_size * heap->element_count,
-	       push_source, heap->element_size);
-	heap->element_count++;
-
-	for (size_t end = 0; end < heap->element_count; end++) {
-		sift_up(heap, end);
-	}
-
-	return true;
-}
-
-bool heap_pop(heap_t *heap, void *pop_destination) {
-	if (0 < heap->element_count) {
-		memcpy(pop_destination, heap->data, heap->element_size);
-		memcpy(heap->data,
-		       (char *)heap->data +
-		           heap->element_size * (heap->element_count - 1),
-		       heap->element_size);
-		heap->element_count--;
-		sift_down(heap, 0, heap->element_count);
-		return true;
+void heap_update(void *src, size_t i, void *base, size_t count, size_t size, 
+             int (*compare)(const void *, const void *)) {
+	if(compare(src, (char *)base + i*size) == -1) {
+		/* Decrease key */
+		memmove((char *)base + i*size, src, size);
+		sift_up(i, base, size, compare);
 	} else {
-		return false;
+		/* Increase key */
+		memmove((char *)base + i*size, src, size);
+		sift_down(i, base, count, size, compare);
 	}
 }
 
-bool heap_replace(heap_t *heap, void *replace_source) {
-	if (0 < heap->element_count) {
-		memswap(heap->data, replace_source, heap->element_size);
-		sift_down(heap, 0, heap->element_count);
-		return true;
+
+
+void heap_delete(size_t i, void *base, size_t count, size_t size, 
+             int (*compare)(const void *, const void *)) {
+	
+	if(compare((char *)base + (count - 1)*size, (char *)base + i*size) == -1) {
+		memmove((char *)base + i*size, (char *)base + (count - 1)*size, size);
+		sift_up(i, base, size, compare);
 	} else {
-		return false;
+		memmove((char *)base + i*size, (char *)base + (count - 1)*size, size);
+		sift_down(i, base, count - 1, size, compare);
 	}
 }
-
-bool heap_peek(heap_t *heap, void *peek_destination) {
-	if (0 < heap->element_count) {
-		memcpy(peek_destination, heap->data, heap->element_size);
-		return true;
-	} else {
-		return false;
-	}
-}
-
-size_t heap_size(heap_t *heap) { return heap->element_count; }
